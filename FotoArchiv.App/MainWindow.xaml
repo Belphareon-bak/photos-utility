@@ -1,0 +1,343 @@
+<Window x:Class="FotoArchiv.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FotoArchiv" Height="850" Width="1440" MinHeight="700" MinWidth="1100"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="64" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="48" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <Grid Margin="24,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Width="38" Height="38" Source="Assets/FotoArchiv-icon.png" Stretch="Uniform" Margin="0,0,10,0" />
+                    <TextBlock Text="FotoArchiv" FontFamily="Segoe UI Variable Display" FontSize="22"
+                               FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+                <Button Grid.Column="1" Style="{StaticResource IconButton}" Command="{Binding CancelCommand}"
+                        Content="&#xE711;" ToolTip="Zastavit probíhající operaci" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="1" SelectedIndex="{Binding ActiveTabIndex}" Margin="20,0,20,16">
+            <TabItem Header="1  Zdroje">
+                <Grid Margin="4,18,4,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="2*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,12" LastChildFill="False">
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="Zdrojové složky"
+                                       DockPanel.Dock="Left" Margin="0" VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                <Button Command="{Binding AddSourceCommand}" Margin="0,0,8,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE710;" Margin="0,0,7,0" />
+                                        <TextBlock Text="Přidat složky" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding RemoveSourceCommand}"
+                                        CommandParameter="{Binding SelectedSource}" Content="&#xE74D;"
+                                        ToolTip="Odebrat vybraný zdroj" />
+                            </StackPanel>
+                        </DockPanel>
+                        <DataGrid Grid.Row="1" ItemsSource="{Binding Sources}" SelectedItem="{Binding SelectedSource}">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Použít" Binding="{Binding IsEnabled}" Width="72" />
+                                <DataGridTextColumn Header="Složka" Binding="{Binding DisplayName}" Width="160" IsReadOnly="True" />
+                                <DataGridTextColumn Header="Cesta" Binding="{Binding Path}" Width="*" IsReadOnly="True" />
+                                <DataGridTextColumn Header="Korekce času (h)" Binding="{Binding CaptureTimeOffsetHours}" Width="125" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
+                    <Border Grid.Column="2" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="22">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="Rozsah kontroly" />
+                            <Grid Grid.Row="1" Margin="0,6,0,20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource LabelText}" Text="FOTOGRAFIE" />
+                                    <TextBlock Text="JPEG, HEIC, PNG, WebP, TIFF, RAW" Margin="0,4,16,0" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Style="{StaticResource LabelText}" Text="DALŠÍ MÉDIA" />
+                                    <TextBlock Text="MOV, MP4, AAE, XMP, JSON" Margin="0,4,0,0" />
+                                </StackPanel>
+                            </Grid>
+                            <StackPanel Grid.Row="2">
+                                <Separator Margin="0,0,0,18" />
+                                <TextBlock Style="{StaticResource LabelText}" Text="PRVNÍ BĚH" />
+                                <TextBlock Text="Duplicity a podobné soubory" FontSize="16" FontWeight="SemiBold" Margin="0,5,0,14" />
+                                <TextBlock Style="{StaticResource LabelText}" Text="VÝSLEDEK" />
+                                <TextBlock Text="{Binding DuplicateSummary}" Margin="0,5,0,0" />
+                            </StackPanel>
+                            <Button Grid.Row="3" Style="{StaticResource PrimaryButton}" Command="{Binding ScanDuplicatesCommand}"
+                                    HorizontalAlignment="Stretch">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE721;" Margin="0,0,8,0" />
+                                    <TextBlock Text="Spustit kontrolu duplicit" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="2  Duplicity">
+                <Grid Margin="4,18,4,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="300" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="390" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Skupiny" />
+                        <DataGrid Grid.Row="1" ItemsSource="{Binding DuplicateGroups}" SelectedItem="{Binding SelectedDuplicateGroup}"
+                                  IsReadOnly="True" SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Jistota" Binding="{Binding ConfidenceLabel}" Width="160" />
+                                <DataGridTextColumn Header="Počet" Binding="{Binding Items.Count}" Width="58" />
+                                <DataGridCheckBoxColumn Header="Hotovo" Binding="{Binding IsResolved}" Width="68" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Margin="0,0,0,12">
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="Porovnání" Margin="0,0,0,4" />
+                            <TextBlock Style="{StaticResource LabelText}" Text="{Binding SelectedDuplicateGroup.Reason}" />
+                        </StackPanel>
+                        <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDuplicateGroup.Items}" SelectedItem="{Binding SelectedMedia}"
+                                  IsReadOnly="True" SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Zachovat" Binding="{Binding WillKeep}" Width="72" />
+                                <DataGridCheckBoxColumn Header="Doporučeno" Binding="{Binding IsRecommendedKeep}" Width="90" />
+                                <DataGridTextColumn Header="Soubor" Binding="{Binding FileName}" Width="180" />
+                                <DataGridTextColumn Header="Kvalita" Binding="{Binding QualityLabel}" Width="240" />
+                                <DataGridTextColumn Header="Datum" Binding="{Binding CapturedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="145" />
+                                <DataGridTextColumn Header="Cesta" Binding="{Binding FilePath}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Command="{Binding KeepRecommendedCommand}" Content="Ponechat doporučenou" Margin="0,0,8,0" />
+                            <Button Command="{Binding KeepSelectedCommand}" Content="Ponechat vybranou" Margin="0,0,8,0" />
+                            <Button Command="{Binding KeepAllCommand}" Content="Ponechat vše" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Grid.Column="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="260" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Detail" />
+                        <Border Grid.Row="1" Background="#ECEFEB" BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1" CornerRadius="4">
+                            <Grid>
+                                <TextBlock Text="Náhled není k dispozici" Foreground="{StaticResource MutedBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Image Source="{Binding PreviewImage}" Stretch="Uniform" />
+                            </Grid>
+                        </Border>
+                        <Grid Grid.Row="2" Margin="0,12,0,10">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource LabelText}" Text="ROZLIŠENÍ" />
+                                <TextBlock Text="{Binding SelectedMedia.Dimensions}" Margin="0,3,0,0" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Style="{StaticResource LabelText}" Text="VELIKOST" />
+                                <TextBlock Text="{Binding SelectedMedia.SizeText}" Margin="0,3,0,0" />
+                            </StackPanel>
+                        </Grid>
+                        <DataGrid Grid.Row="3" ItemsSource="{Binding SelectedMedia.Metadata}" IsReadOnly="True" RowHeight="32">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Skupina" Binding="{Binding Group}" Width="110" />
+                                <DataGridTextColumn Header="Pole" Binding="{Binding Name}" Width="130" />
+                                <DataGridTextColumn Header="Hodnota" Binding="{Binding Value}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
+                    <DockPanel Grid.Row="1" Grid.ColumnSpan="5" Margin="0,14,0,0">
+                        <TextBlock Text="{Binding DuplicateSummary}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding RunQuarantineCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8B7;" Margin="0,0,8,0" />
+                                <TextBlock Text="Provést rozhodnutí o duplicitách" />
+                            </StackPanel>
+                        </Button>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="3  Organizace">
+                <Grid Margin="4,18,4,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="18" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="18">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="2.2*" />
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="1.2*" />
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="1.2*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource LabelText}" Text="CÍLOVÁ SLOŽKA" />
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Command="{Binding SelectDestinationCommand}"
+                                            Content="&#xE8B7;" ToolTip="Vybrat cílovou složku" Margin="8,0,0,0" />
+                                    <TextBox Text="{Binding DestinationRoot, UpdateSourceTrigger=PropertyChanged}" />
+                                </DockPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource LabelText}" Text="STRUKTURA" />
+                                <CheckBox IsChecked="{Binding SplitLocationByDate}" Content="Datum jako podsložka" />
+                                <CheckBox IsChecked="{Binding IncludeCountry}" Content="Přidat stát" />
+                                <CheckBox IsChecked="{Binding IncludeRegion}" Content="Přidat region" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Style="{StaticResource LabelText}" Text="REŽIM" />
+                                <RadioButton IsChecked="{Binding IsCopyMode}" Content="Kopírovat a ověřit" GroupName="TransferMode" />
+                                <RadioButton IsChecked="{Binding IsMoveMode}" Content="Přesunout po ověření" GroupName="TransferMode" />
+                                <TextBlock Text="Okoř\2025-09-12\001.heic" Foreground="{StaticResource AccentBrush}" Margin="0,7,0,0" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <DataGrid Grid.Row="2" ItemsSource="{Binding MediaItems}" SelectedItem="{Binding SelectedMedia}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Soubor" Binding="{Binding FileName}" Width="190" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Datum pořízení" Binding="{Binding CapturedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="150" />
+                            <DataGridTextColumn Header="Zdroj data" Binding="{Binding CaptureDateSource}" Width="130" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Lokalita" Binding="{Binding LocationName, UpdateSourceTrigger=PropertyChanged}" Width="170" />
+                            <DataGridTextColumn Header="Stát" Binding="{Binding CountryCode}" Width="65" />
+                            <DataGridTextColumn Header="Region" Binding="{Binding RegionName}" Width="150" />
+                            <DataGridTextColumn Header="GPS" Binding="{Binding LocationDisplay}" Width="170" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Původní cesta" Binding="{Binding FilePath}" Width="*" IsReadOnly="True" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <DockPanel Grid.Row="3" Margin="0,12,0,0">
+                        <TextBlock Text="{Binding MediaSummary}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding BuildPlanCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE9D2;" Margin="0,0,8,0" />
+                                <TextBlock Text="Připravit náhled cest" />
+                            </StackPanel>
+                        </Button>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="4  Provedení">
+                <Grid Margin="4,18,4,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="Náhled operací" />
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding PlanItems}" IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Akce" Binding="{Binding Action}" Width="90" />
+                            <DataGridTextColumn Header="Zdroj" Binding="{Binding SourcePath}" Width="*" />
+                            <DataGridTextColumn Header="Cíl" Binding="{Binding TargetPath}" Width="*" />
+                            <DataGridTextColumn Header="Upozornění" Binding="{Binding Warning}" Width="220" />
+                            <DataGridTextColumn Header="Stav" Binding="{Binding Status}" Width="100" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <DockPanel Grid.Row="2" Margin="0,12,0,0">
+                        <TextBlock Text="Zatím nebyl změněn žádný soubor" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding ExecutePlanCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE768;" Margin="0,0,8,0" />
+                                <TextBlock Text="Spustit organizaci" />
+                            </StackPanel>
+                        </Button>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="5  Historie">
+                <Grid Margin="4,18,4,0">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="Historie běhů" />
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding History}" SelectedItem="{Binding SelectedHistory}" IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Běh" Binding="{Binding RunId}" Width="70" />
+                            <DataGridTextColumn Header="Typ" Binding="{Binding RunType}" Width="140" />
+                            <DataGridTextColumn Header="Zahájeno" Binding="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="160" />
+                            <DataGridTextColumn Header="Dokončeno" Binding="{Binding CompletedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="160" />
+                            <DataGridTextColumn Header="Hotovo" Binding="{Binding CompletedCount}" Width="85" />
+                            <DataGridTextColumn Header="Chyby" Binding="{Binding ErrorCount}" Width="85" />
+                            <DataGridTextColumn Header="Stav" Binding="{Binding Status}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Button Grid.Row="2" Command="{Binding UndoRunCommand}" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE7A7;" Margin="0,0,8,0" />
+                            <TextBlock Text="Vrátit vybraný běh" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
+            <Grid Margin="22,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <ProgressBar Grid.Column="1" Height="5" Value="{Binding ProgressValue}" Maximum="100"
+                             VerticalAlignment="Center" Foreground="{StaticResource AccentBrush}" Background="#E0E4DF" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,9 @@
+.dotnet/
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+artifacts/
+TestResults/
+*.fotoarchiv-*.partial
