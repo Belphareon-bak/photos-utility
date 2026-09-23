@@ -259,7 +259,9 @@ public sealed class MainViewModel : ObservableObject
 
             var warnings = new ConcurrentQueue<string>();
             StatusMessage = "Procházím zdrojové složky…";
-            var descriptors = await Task.Run(() => _scanner.EnumerateFiles(Sources, warnings.Enqueue, cancellationToken), cancellationToken);
+            var scanSettings = CurrentSettings();
+            var descriptors = await Task.Run(() => _scanner.EnumerateFiles(Sources, warnings.Enqueue, cancellationToken,
+                [scanSettings.QuarantineFolderName, scanSettings.RejectedFolderName]), cancellationToken);
             var sourceOffsets = Sources
                 .Where(source => source.IsEnabled)
                 .ToDictionary(source => Path.GetFullPath(source.Path), source => source.CaptureTimeOffsetHours, StringComparer.OrdinalIgnoreCase);

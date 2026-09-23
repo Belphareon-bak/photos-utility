@@ -22,4 +22,22 @@ public sealed class MediaScannerTests
         var file = Assert.Single(files);
         Assert.EndsWith("photo.jpg", file.Path);
     }
+
+    [Fact]
+    public void EnumerateFiles_SkipsSynologyServiceFoldersAndConfiguredNames()
+    {
+        using var directory = new TestDirectory();
+        File.WriteAllBytes(directory.File("photo.jpg"), [1]);
+        // @eaDir drzi nahledy Synology - bez preskoceni se nactou jako fotografie
+        File.WriteAllBytes(directory.File("@eaDir/photo.jpg/SYNOPHOTO_THUMB_M.jpg"), [1]);
+        File.WriteAllBytes(directory.File("#recycle/smazana.jpg"), [1]);
+        File.WriteAllBytes(directory.File("_NeniFoto/rozbity.jpg"), [1]);
+        File.WriteAllBytes(directory.File("VlastniKaranten/odlozena.jpg"), [1]);
+
+        var files = new MediaScanner().EnumerateFiles(
+            [new SourceFolder(directory.Path)], null, CancellationToken.None, ["VlastniKaranten"]);
+
+        var file = Assert.Single(files);
+        Assert.Equal(Path.Combine(directory.Path, "photo.jpg"), file.Path);
+    }
 }

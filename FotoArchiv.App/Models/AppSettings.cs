@@ -8,4 +8,5 @@ public sealed class AppSettings
     public bool IncludeRegion { get; set; }
     public TransferMode TransferMode { get; set; } = TransferMode.Copy;
     public string QuarantineFolderName { get; set; } = "_DuplicatesReview";
+    public string RejectedFolderName { get; set; } = "_NeniFoto";
 }

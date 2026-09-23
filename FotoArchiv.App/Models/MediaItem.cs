@@ -36,6 +36,10 @@ public sealed class MediaItem : ObservableObject
     public double? Latitude { get; set; }
     public double? Longitude { get; set; }
     public string? Error { get; set; }
+
+    // Vyplneno, kdyz soubor ma priponu fotky nebo videa, ale pouzitelny zaznam to neni.
+    // Takove soubory se do archivu nekopiruji, odkladaji se stranou. Null = v poradku.
+    public string? RejectionReason { get; set; }
     public string BundleKey { get; set; } = string.Empty;
     public ObservableCollection<MetadataField> Metadata { get; } = [];
 

@@ -41,6 +41,7 @@ public sealed partial class MetadataReaderService
         {
             item.CapturedAt = TryParseDateFromFileName(item.FileName, out var sidecarDate) ? sidecarDate : null;
             item.CaptureDateSource = item.CapturedAt is null ? "Neznámé" : "Název souboru";
+            if (item.FileSize == 0) item.RejectionReason = "Soubor je prazdny";
             return item;
         }
 
@@ -79,6 +80,18 @@ public sealed partial class MetadataReaderService
             {
                 item.Error ??= exception.Message;
             }
+
+            // MagickImageInfo rozpoznava format podle obsahu, ne podle pripony. Kdyz selze
+            // nebo nevrati rozmery, neni to obrazek - at uz je poskozeny, nebo jen prejmenovany.
+            if (item.Width is not > 0 || item.Height is not > 0)
+            {
+                item.RejectionReason = "Soubor nelze nacist jako obrazek";
+            }
+        }
+
+        if (item.FileSize == 0)
+        {
+            item.RejectionReason = "Soubor je prazdny";
         }
 
         if (item.CapturedAt is null && TryParseDateFromFileName(item.FileName, out var fileNameDate))

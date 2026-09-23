@@ -15,8 +15,22 @@ public sealed class OrganizationPlanner
 
         var destinationRoot = Path.GetFullPath(settings.DestinationRoot);
         var active = media.Where(item => item.WillKeep).ToList();
-        var primaries = active.Where(item => item.Kind != MediaKind.Sidecar).ToList();
-        var sidecars = active.Where(item => item.Kind == MediaKind.Sidecar).ToList();
+
+        // Soubory, ktere nejsou pouzitelna fotografie ani video, do archivu nepatri.
+        // Odkladaji se stranou a nesmi vstoupit do cislovani, jinak by v rade 001, 002…
+        // vznikaly diry. Sidecar odchazi stranou spolu se svym primarnim souborem.
+        var rejectedBundles = active
+            .Where(item => item.Kind != MediaKind.Sidecar && item.RejectionReason is not null)
+            .Select(item => item.BundleKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var rejected = active
+            .Where(item => item.RejectionReason is not null ||
+                           (item.Kind == MediaKind.Sidecar && rejectedBundles.Contains(item.BundleKey)))
+            .ToList();
+        var rejectedSet = rejected.ToHashSet();
+        var usable = active.Where(item => !rejectedSet.Contains(item)).ToList();
+        var primaries = usable.Where(item => item.Kind != MediaKind.Sidecar).ToList();
+        var sidecars = usable.Where(item => item.Kind == MediaKind.Sidecar).ToList();
         var bundleTargets = new Dictionary<string, (string Directory, string BaseName, MediaItem Representative)>();
         var usedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var plans = new List<OrganizationPlanItem>();
@@ -95,6 +109,23 @@ public sealed class OrganizationPlanner
             plans.Add(CreatePlan(sidecar, target, settings.TransferMode));
         }
 
+        foreach (var item in rejected)
+        {
+            var target = MakeUnique(
+                Path.Combine(destinationRoot, SanitizeSegment(settings.RejectedFolderName), SafeRelativePath(item)),
+                usedTargets);
+            usedTargets.Add(target);
+            item.TargetPath = target;
+            plans.Add(new OrganizationPlanItem
+            {
+                Media = item,
+                SourcePath = item.FilePath,
+                TargetPath = target,
+                Action = settings.TransferMode == TransferMode.Copy ? PlannedAction.Copy : PlannedAction.Move,
+                Warning = item.RejectionReason ?? "Soubor neni pouzitelna fotografie ani video."
+            });
+        }
+
         return plans.OrderBy(plan => plan.TargetPath).ToList();
     }
 
@@ -122,8 +153,8 @@ public sealed class OrganizationPlanner
                 DuplicateConfidence.High => "2_High",
                 _ => "3_Review"
             };
-            var relative = Path.GetRelativePath(item.SourceRoot, item.FilePath);
-            var target = Path.Combine(item.SourceRoot, settings.QuarantineFolderName, confidenceFolder, relative);
+            var target = Path.Combine(item.SourceRoot, SanitizeSegment(settings.QuarantineFolderName),
+                confidenceFolder, SafeRelativePath(item));
             target = MakeUnique(target, usedTargets);
             usedTargets.Add(target);
             plans.Add(new OrganizationPlanItem
@@ -181,6 +212,27 @@ public sealed class OrganizationPlanner
         }
 
         return Path.GetExtension(fileName).ToLowerInvariant();
+    }
+
+    // Path.GetRelativePath vraci segmenty ".." kdyz SourceRoot neni predkem FilePath.
+    // Path.Combine by pak vysledek vyvedl mimo urcenou slozku, takze se v tom pripade
+    // vraci jen jmeno souboru.
+    private static string SafeRelativePath(MediaItem item)
+    {
+        try
+        {
+            var relative = Path.GetRelativePath(item.SourceRoot, item.FilePath);
+            if (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
+            {
+                return relative;
+            }
+        }
+        catch (ArgumentException)
+        {
+            // neplatna cesta - spadne na jmeno souboru nize
+        }
+
+        return item.FileName;
     }
 
     private static string MakeUnique(string path, HashSet<string> used)

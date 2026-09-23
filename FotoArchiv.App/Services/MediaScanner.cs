@@ -20,11 +20,23 @@ public sealed class MediaScanner
         ".aae", ".xmp", ".json"
     };
 
+    /// <param name="ignoredFolderNames">
+    /// Jmena sluzebnich slozek, ktere se maji preskocit navic k vychozim. Patri sem
+    /// nazvy z nastaveni (karantena, odlozene soubory) - kdyz se nepredaji, sken je
+    /// pri dalsim behu nacte znovu jako zdrojova data.
+    /// </param>
     public IReadOnlyList<(string Path, string Root, MediaKind Kind)> EnumerateFiles(
         IEnumerable<SourceFolder> sources,
         Action<string>? warning,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IEnumerable<string>? ignoredFolderNames = null)
     {
+        var ignored = new HashSet<string>(DefaultIgnoredFolders, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in ignoredFolderNames ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(name)) ignored.Add(name.Trim());
+        }
+
         var files = new List<(string Path, string Root, MediaKind Kind)>();
         var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -49,7 +61,7 @@ public sealed class MediaScanner
                 {
                     foreach (var child in Directory.EnumerateDirectories(directory))
                     {
-                        if (!IsIgnoredDirectory(child) && !IsReparsePoint(child))
+                        if (!IsIgnoredDirectory(child, ignored) && !IsReparsePoint(child))
                         {
                             pending.Push(child);
                         }
@@ -102,13 +114,17 @@ public sealed class MediaScanner
         return false;
     }
 
-    private static bool IsIgnoredDirectory(string path)
+    private static readonly string[] DefaultIgnoredFolders =
+    {
+        "$RECYCLE.BIN", "System Volume Information", "_DuplicatesReview", "_NeniFoto",
+        // sluzebni slozky Synology - bez nich sken nacte nahledy z @eaDir jako fotografie
+        "@eaDir", "#recycle", "#snapshot"
+    };
+
+    private static bool IsIgnoredDirectory(string path, HashSet<string> ignored)
     {
         var name = Path.GetFileName(path);
-        return name.StartsWith('.') ||
-               name.Equals("$RECYCLE.BIN", StringComparison.OrdinalIgnoreCase) ||
-               name.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase) ||
-               name.Equals("_DuplicatesReview", StringComparison.OrdinalIgnoreCase);
+        return name.StartsWith('.') || ignored.Contains(name);
     }
 
     private static bool IsReparsePoint(string path)

@@ -24,6 +24,51 @@ public sealed class OrganizationPlannerTests
     }
 
     [Fact]
+    public void Build_MovesUnusableFileAsideAndKeepsNumberingIntact()
+    {
+        using var source = new TestDirectory();
+        using var destination = new TestDirectory();
+        var photo = TestMedia.Create(source.File("phone/IMG_1234.jpg"), source.Path);
+        var notAPhoto = TestMedia.Create(source.File("phone/rozbity.jpg"), source.Path);
+        notAPhoto.RejectionReason = "Soubor nelze nacist jako obrazek";
+
+        var plan = new OrganizationPlanner().Build([photo, notAPhoto], new AppSettings
+        {
+            DestinationRoot = destination.Path,
+            SplitLocationByDate = true
+        });
+
+        var archived = Assert.Single(plan, item => item.Media == photo);
+        var setAside = Assert.Single(plan, item => item.Media == notAPhoto);
+
+        // nepouzitelny soubor nesmi zabrat cislo v rade, jinak by v archivu vznikla dira
+        Assert.Equal(Path.Combine(destination.Path, "Okoř", "2025-09-12", "001.jpg"), archived.TargetPath);
+        Assert.Equal(Path.Combine(destination.Path, "_NeniFoto", "phone", "rozbity.jpg"), setAside.TargetPath);
+        Assert.Equal("Soubor nelze nacist jako obrazek", setAside.Warning);
+    }
+
+    [Fact]
+    public void Build_KeepsSidecarWithItsRejectedPrimary()
+    {
+        using var source = new TestDirectory();
+        using var destination = new TestDirectory();
+        var primary = TestMedia.Create(source.File("IMG_1234.jpg"), source.Path);
+        primary.RejectionReason = "Soubor je prazdny";
+        var sidecar = TestMedia.Create(source.File("IMG_1234.xmp"), source.Path, MediaKind.Sidecar);
+
+        var plan = new OrganizationPlanner().Build([primary, sidecar], new AppSettings
+        {
+            DestinationRoot = destination.Path
+        });
+
+        // sidecar nesmi zustat osirely v archivu, kdyz jeho fotka odesla stranou
+        Assert.Equal(2, plan.Count);
+        Assert.All(plan, item => Assert.StartsWith(
+            Path.Combine(destination.Path, "_NeniFoto"), item.TargetPath));
+        Assert.DoesNotContain(plan, item => item.Action == PlannedAction.Skip);
+    }
+
+    [Fact]
     public void Build_CanMergeDatesInsideLocation()
     {
         using var source = new TestDirectory();
