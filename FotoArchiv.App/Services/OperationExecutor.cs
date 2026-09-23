@@ -174,11 +174,34 @@ public sealed class OperationExecutor(CatalogService catalog)
 
     private static async Task CopyAsync(string source, string target, CancellationToken cancellationToken)
     {
-        await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
-            1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-            1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.WriteThrough);
-        await input.CopyToAsync(output, 1024 * 1024, cancellationToken);
-        await output.FlushAsync(cancellationToken);
+        await using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
+            1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+        await using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+            1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.WriteThrough))
+        {
+            await input.CopyToAsync(output, 1024 * 1024, cancellationToken);
+            await output.FlushAsync(cancellationToken);
+        }
+
+        PreserveTimestamps(source, target);
+    }
+
+    // Kopie pres FileStream casova razitka neprenasi, na rozdil od File.Copy. Bez tohoto kroku
+    // dostane cil aktualni cas a u souboru bez EXIF se nenavratne ztrati jediny zbyvajici
+    // udaj o dobe porizeni. Razitka se nastavuji na docasny .partial soubor a File.Move
+    // je pri prejmenovani zachova.
+    private static void PreserveTimestamps(string source, string target)
+    {
+        try
+        {
+            var info = new FileInfo(source);
+            File.SetLastWriteTimeUtc(target, info.LastWriteTimeUtc);
+            File.SetCreationTimeUtc(target, info.CreationTimeUtc);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                              or ArgumentOutOfRangeException or PlatformNotSupportedException)
+        {
+            // Nektere cile (SMB, FAT) zapis razitek odmitnou; samotna kopie tim neprestava platit.
+        }
     }
 }

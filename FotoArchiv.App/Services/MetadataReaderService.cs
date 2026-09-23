@@ -89,7 +89,13 @@ public sealed partial class MetadataReaderService
 
         if (item.CapturedAt is null)
         {
-            item.CapturedAt = item.FileCreatedAt;
+            // Kopirovani souboru zachova LastWriteTime, ale CreationTime nastavi na teď.
+            // U materialu, ktery byl nekolikrat stehovany, je proto starsi z obou hodnot
+            // vyrazne lepsi odhad nez kterakoli z nich zvlast.
+            // Retezec "Čas souboru" nemenit - filtruje se podle nej v SidecarMetadataService.
+            item.CapturedAt = item.FileModifiedAt < item.FileCreatedAt
+                ? item.FileModifiedAt
+                : item.FileCreatedAt;
             item.CaptureDateSource = "Čas souboru";
         }
 
@@ -110,6 +116,19 @@ public sealed partial class MetadataReaderService
         }
     }
 
+    // EXIF uklada mistni cas bez zony, zatimco hlavicka QuickTime/MP4 uklada UTC.
+    // Oznacit oboji jako mistni cas posune datum videa o posun zony a zaznam porizeny
+    // krátce po pulnoci spadne do slozky predchoziho dne.
+    private static DateTimeOffset BuildCaptureDate(DateTime value, string directoryName)
+    {
+        var isUtc = directoryName.Contains("QuickTime", StringComparison.OrdinalIgnoreCase) ||
+                    directoryName.Contains("MP4", StringComparison.OrdinalIgnoreCase);
+
+        return isUtc
+            ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)).ToLocalTime()
+            : new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Local));
+    }
+
     private static void ReadCaptureDate(IReadOnlyList<MetadataExtractor.Directory> directories, MediaItem item)
     {
         foreach (var preferredName in PreferredDateTags)
@@ -121,7 +140,7 @@ public sealed partial class MetadataReaderService
 
                 if (tag is not null && directory.TryGetDateTime(tag.Type, out var date))
                 {
-                    item.CapturedAt = new DateTimeOffset(DateTime.SpecifyKind(date, DateTimeKind.Local));
+                    item.CapturedAt = BuildCaptureDate(date, directory.Name);
                     item.CaptureDateSource = preferredName;
                     return;
                 }

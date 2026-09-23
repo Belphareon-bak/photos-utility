@@ -35,6 +35,34 @@ public sealed class OperationExecutorTests
     }
 
     [Fact]
+    public async Task Copy_PreservesSourceLastWriteTime()
+    {
+        // Kopie pres FileStream razitka neprenasi. Bez PreserveTimestamps dostane cil
+        // aktualni cas a u souboru bez EXIF se ztrati jediny udaj o dobe porizeni.
+        using var directory = new TestDirectory();
+        var source = directory.File("source/photo.jpg");
+        var target = directory.File("archive/Okoř/2016-08-13/001.jpg");
+        await File.WriteAllBytesAsync(source, [1, 2, 3, 4, 5]);
+
+        var expected = new DateTime(2016, 8, 13, 22, 3, 52, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(source, expected);
+
+        var plan = new OrganizationPlanItem
+        {
+            Media = TestMedia.Create(source, directory.Path, fileSize: 5),
+            SourcePath = source,
+            TargetPath = target,
+            Action = PlannedAction.Copy
+        };
+        var executor = new OperationExecutor(new CatalogService(directory.File("state/catalog.db")));
+
+        await executor.ExecuteAsync([plan], "Test razitek", null, CancellationToken.None);
+
+        Assert.Equal("Hotovo", plan.Status);
+        Assert.Equal(expected, File.GetLastWriteTimeUtc(target));
+    }
+
+    [Fact]
     public async Task Move_UsesVerifiedCopyAndUndoRestoresOriginalPath()
     {
         using var directory = new TestDirectory();
