@@ -69,6 +69,10 @@ public sealed class MediaScanner
 
                     foreach (var file in Directory.EnumerateFiles(directory))
                     {
+                        // "._jmeno.jpg" jsou metadata, ktera Mac zanechava na cizich discich
+                        // (AppleDouble). Maji priponu fotky, ale fotka to neni - na NAS jich je 201.
+                        if (Path.GetFileName(file).StartsWith("._", StringComparison.Ordinal)) continue;
+
                         if (TryGetKind(file, out var kind))
                         {
                             var fullPath = Path.GetFullPath(file);

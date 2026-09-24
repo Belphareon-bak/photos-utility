@@ -51,4 +51,22 @@ public sealed class GeoNamesServiceTests
 
         Assert.Null(item.LocationName);
     }
+
+    [Theory]
+    [InlineData(50.0287, 14.4493, "chimney")]   // presne na komine teplarny v Krci
+    [InlineData(50.0842, 14.5288, "Substation")] // rozvodna Malesice
+    [InlineData(50.0, 14.5, "Čechy")]            // stredovy bod regionu Cechy
+    public async Task Resolve_NamesOnlyPopulatedPlaces(double latitude, double longitude, string mustNotContain)
+    {
+        using var directory = new TestDirectory();
+        var item = TestMedia.Create(directory.File("photo.jpg"), directory.Path, location: null);
+        item.Latitude = latitude;
+        item.Longitude = longitude;
+
+        await new GeoNamesService(Path.Combine(AppContext.BaseDirectory, "Data"))
+            .ResolveAsync([item], null, CancellationToken.None);
+
+        Assert.NotNull(item.LocationName);
+        Assert.DoesNotContain(mustNotContain, item.LocationName);
+    }
 }

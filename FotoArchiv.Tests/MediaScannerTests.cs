@@ -40,4 +40,17 @@ public sealed class MediaScannerTests
         var file = Assert.Single(files);
         Assert.Equal(Path.Combine(directory.Path, "photo.jpg"), file.Path);
     }
+
+    [Fact]
+    public void EnumerateFiles_SkipsAppleDoubleFiles()
+    {
+        using var directory = new TestDirectory();
+        File.WriteAllBytes(directory.File("photo.jpg"), [1]);
+        File.WriteAllBytes(directory.File("._photo.jpg"), [0, 5, 22, 7]);   // metadata z Macu
+
+        var files = new MediaScanner().EnumerateFiles(
+            [new SourceFolder(directory.Path)], null, CancellationToken.None);
+
+        Assert.Equal(Path.Combine(directory.Path, "photo.jpg"), Assert.Single(files).Path);
+    }
 }

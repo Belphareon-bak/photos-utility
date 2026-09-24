@@ -83,7 +83,11 @@ public sealed class GeoNamesService
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         var parts = line.Split('\t');
-                        if (parts.Length < 15 ||
+                        // Jen trida P - obce, mesta a jejich casti. Podrobna data zemi (CZ.zip)
+                        // obsahuji i budovy, komíny, rozvodny, hotely, kopce a regiony; bez filtru
+                        // dostala fotka z Krce slozku "[Praha-Krč] heat plant chimney"
+                        // a jina slozku "Čechy" podle stredoveho bodu regionu.
+                        if (parts.Length < 15 || parts[6] != "P" ||
                             !long.TryParse(parts[0], out var id) || !knownIds.Add(id) ||
                             !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var latitude) ||
                             !double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var longitude))
