@@ -12,7 +12,11 @@ public sealed partial class MetadataReaderService
     private static readonly string[] PreferredDateTags =
     {
         "Date/Time Original", "Date/Time Digitized", "Create Date", "Creation Time",
-        "Media Create Date", "Date/Time"
+        "Media Create Date",
+        // MetadataExtractor pojmenovava datum v hlavicce QuickTime/MP4 "Created". Bez teto
+        // polozky nedostalo datum z metadat zadne video a vsechna spadla na cas souboru.
+        "Created",
+        "Date/Time"
     };
 
     public Task<MediaItem> ReadAsync(
@@ -26,16 +30,37 @@ public sealed partial class MetadataReaderService
     {
         cancellationToken.ThrowIfCancellationRequested();
         var file = new FileInfo(path);
-        var item = new MediaItem
+        MediaItem item;
+        try
         {
-            FilePath = file.FullName,
-            SourceRoot = sourceRoot,
-            Kind = kind,
-            FileSize = file.Length,
-            FileCreatedAt = file.CreationTime,
-            FileModifiedAt = file.LastWriteTime,
-            BundleKey = BuildBundleKey(path)
-        };
+            item = new MediaItem
+            {
+                FilePath = file.FullName,
+                SourceRoot = sourceRoot,
+                Kind = kind,
+                FileSize = file.Length,
+                FileCreatedAt = file.CreationTime,
+                FileModifiedAt = file.LastWriteTime,
+                BundleKey = BuildBundleKey(path)
+            };
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Soubor zmizel nebo je zamceny mezi skenem a ctenim - na NAS se to deje.
+            // Vyjimka by jinak propadla z Parallel.ForEachAsync v MainViewModel a shodila
+            // cely sken. Polozka dostane duvod vyrazeni a pri provadeni skonci chybou,
+            // zdroje se nic nedotkne.
+            return new MediaItem
+            {
+                FilePath = file.FullName,
+                SourceRoot = sourceRoot,
+                Kind = kind,
+                BundleKey = BuildBundleKey(path),
+                Error = exception.Message,
+                RejectionReason = "Soubor nelze otevrit",
+                CaptureDateSource = "Neznámé"
+            };
+        }
 
         if (kind == MediaKind.Sidecar)
         {
@@ -132,14 +157,32 @@ public sealed partial class MetadataReaderService
     // EXIF uklada mistni cas bez zony, zatimco hlavicka QuickTime/MP4 uklada UTC.
     // Oznacit oboji jako mistni cas posune datum videa o posun zony a zaznam porizeny
     // krátce po pulnoci spadne do slozky predchoziho dne.
-    private static DateTimeOffset BuildCaptureDate(DateTime value, string directoryName)
-    {
-        var isUtc = directoryName.Contains("QuickTime", StringComparison.OrdinalIgnoreCase) ||
-                    directoryName.Contains("MP4", StringComparison.OrdinalIgnoreCase);
+    private static bool IsUtcDirectory(string directoryName) =>
+        directoryName.Contains("QuickTime", StringComparison.OrdinalIgnoreCase) ||
+        directoryName.Contains("MP4", StringComparison.OrdinalIgnoreCase);
 
-        return isUtc
+    private static DateTimeOffset BuildCaptureDate(DateTime value, string directoryName) =>
+        IsUtcDirectory(directoryName)
             ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)).ToLocalTime()
             : new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Local));
+
+    // Formaty kodují "datum neni nastaveno" jako nulu sve epochy: QuickTime 1904-01-01,
+    // Unix 1970-01-01, FAT/DOS 1980-01-01. Takove datum neni datum porizeni - bez teto
+    // kontroly by video bez data skoncilo ve slozce 1904. Datum z budoucnosti je rozhozeny cas.
+    private static readonly DateTime[] EpochZeros =
+    {
+        new(1904, 1, 1), new(1970, 1, 1), new(1980, 1, 1)
+    };
+
+    private static bool IsPlausibleCaptureDate(DateTimeOffset value)
+    {
+        foreach (var zero in EpochZeros)
+        {
+            // porovnava se UTC i mistni zapis - nula muze prijit v kterekoli podobe
+            if (value.UtcDateTime == zero || value.DateTime == zero) return false;
+        }
+
+        return value <= DateTimeOffset.Now.AddDays(1);
     }
 
     private static void ReadCaptureDate(IReadOnlyList<MetadataExtractor.Directory> directories, MediaItem item)
@@ -153,12 +196,21 @@ public sealed partial class MetadataReaderService
 
                 if (tag is not null && directory.TryGetDateTime(tag.Type, out var date))
                 {
-                    item.CapturedAt = BuildCaptureDate(date, directory.Name);
-                    item.CaptureDateSource = preferredName;
-                    return;
+                    var candidate = BuildCaptureDate(date, directory.Name);
+                    if (IsPlausibleCaptureDate(candidate))
+                    {
+                        item.CapturedAt = candidate;
+                        item.CaptureDateSource = preferredName;
+                        return;
+                    }
+
+                    // nulova hodnota (napr. 1904-01-01 u videa bez data) - zkusit dalsi znacku
+                    continue;
                 }
 
-                if (tag?.Description is { } value && TryParseMetadataDate(value, out var parsed))
+                if (tag?.Description is { } value &&
+                    TryParseMetadataDate(value, IsUtcDirectory(directory.Name), out var parsed) &&
+                    IsPlausibleCaptureDate(parsed))
                 {
                     item.CapturedAt = parsed;
                     item.CaptureDateSource = preferredName;
@@ -168,18 +220,25 @@ public sealed partial class MetadataReaderService
         }
     }
 
-    private static bool TryParseMetadataDate(string value, out DateTimeOffset result)
+    private static bool TryParseMetadataDate(string value, bool assumeUtc, out DateTimeOffset result)
     {
+        // hodnota bez zony: z QuickTime/MP4 je to UTC, z EXIF mistni cas
+        var style = DateTimeStyles.AllowWhiteSpaces |
+                    (assumeUtc ? DateTimeStyles.AssumeUniversal : DateTimeStyles.AssumeLocal);
         var formats = new[]
         {
             "yyyy:MM:dd HH:mm:ss", "yyyy:MM:dd HH:mm:ssK", "yyyy-MM-dd HH:mm:ss",
             "yyyy-MM-ddTHH:mm:ssK", "ddd MMM dd HH:mm:ss K yyyy"
         };
 
-        return DateTimeOffset.TryParseExact(value, formats, CultureInfo.InvariantCulture,
-                   DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeLocal, out result) ||
-               DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,
-                   DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeLocal, out result);
+        if (DateTimeOffset.TryParseExact(value, formats, CultureInfo.InvariantCulture, style, out result) ||
+            DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, style, out result))
+        {
+            result = result.ToLocalTime();
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryParseDateFromFileName(string fileName, out DateTimeOffset result)

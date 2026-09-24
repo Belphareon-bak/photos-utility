@@ -11,9 +11,13 @@ public static class QualityRanker
 
     public static MediaItem SelectBest(IEnumerable<MediaItem> items)
     {
+        // RAW vzdy vyhrava. Potom rozliseni a az pak format - jinak zmensene PNG (poradi 5)
+        // porazilo originalni JPG (poradi 3) s mnohonasobne vetsim rozlisenim. PNG v telefonnich
+        // fotkach skoro vzdy znamena snimek obrazovky nebo export, ne original.
         var ordered = items
-            .OrderByDescending(item => FormatRank(item.Extension))
+            .OrderByDescending(item => RawExtensions.Contains(item.Extension))
             .ThenByDescending(item => item.PixelCount)
+            .ThenByDescending(item => FormatRank(item.Extension))
             .ThenByDescending(item => item.BitDepth ?? 0)
             .ThenByDescending(item => item.FileSize)
             .ThenByDescending(item => item.Metadata.Count)

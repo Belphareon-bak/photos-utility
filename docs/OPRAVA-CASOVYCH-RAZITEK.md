@@ -78,6 +78,13 @@ z Google Takeout JSONu — sidecar by přestal takto označené položky považo
 za přepsatelné. Pokud se ten popisek má změnit, musí se změnit na všech třech místech.
 
 ### 3. Datum z videa se už neposouvá o časovou zónu
+
+> **Oprava tvrzení z 2026-09-23 (doplněno 2026-09-24).** V první verzi tohoto dokumentu
+> stálo, že tahle úprava řeší videa zařazená do předchozího dne. **Na skutečná videa
+> ale nepůsobila**, protože FotoArchiv datum z videa vůbec nečetl — `MetadataExtractor`
+> ho pojmenovává `Created` a ta značka v `PreferredDateTags` chyběla. Logika převodu byla
+> správná, jen se k ní kód nikdy nedostal. Ověřeno a opraveno až při druhé revizi,
+> viz `REVIZE-2-2026-09-24.md`. Teprve od té chvíle úprava skutečně působí.
 `Services/MetadataReaderService.cs` — nová metoda `BuildCaptureDate`.
 
 Původní kód označil `DateTimeKind.Local` **každé** datum z metadat. U EXIF

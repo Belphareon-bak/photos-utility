@@ -31,7 +31,13 @@ public sealed class GeoNamesService
         }
 
         await EnsureLoadedAsync(progress, cancellationToken);
-        var located = media.Where(item => item.Latitude.HasValue && item.Longitude.HasValue).ToList();
+        // 0, 0 je "bez polohy" (telefon bez signalu), ne skutecne misto - nejblizsi obec
+        // k tomu bodu lezi v Ghane. Sidecar z Google Takeout tuhle hodnotu uz odmita,
+        // GPS z EXIF ne.
+        var located = media
+            .Where(item => item.Latitude.HasValue && item.Longitude.HasValue &&
+                           !(Math.Abs(item.Latitude.Value) < 1e-6 && Math.Abs(item.Longitude.Value) < 1e-6))
+            .ToList();
         var completed = 0;
 
         foreach (var item in located)
@@ -114,6 +120,8 @@ public sealed class GeoNamesService
         }
     }
 
+    private const double MaxPlaceDistanceKm = 50;
+
     private GeoPlace? FindNearest(double latitude, double longitude)
     {
         var cacheKey = ((int)Math.Round(latitude * 1000), (int)Math.Round(longitude * 1000));
@@ -146,6 +154,10 @@ public sealed class GeoNamesService
 
             if (nearest is not null) break;
         }
+
+        // Hledani jde az do okruhu 10 stupnu (pres 1 000 km). Fotka z letadla nebo z lodi
+        // by jinak dostala jmeno mista, ktere s ni nesouvisi; radeji zadna lokalita.
+        if (nearestDistance > MaxPlaceDistanceKm) nearest = null;
 
         _cache[cacheKey] = nearest;
         return nearest;
