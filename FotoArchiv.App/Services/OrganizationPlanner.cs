@@ -138,14 +138,17 @@ public sealed class OrganizationPlanner
     {
         var usedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var plans = new List<OrganizationPlanItem>();
-        var selected = media.Where(item => !item.WillKeep).ToHashSet();
+        // Pri opakovani po castecne chybe znovu zpracovat jen soubory,
+        // ktere jeste nebyly uspesne presunuty do karanteny.
+        var selected = media.Where(item => !item.WillKeep && !IsAlreadyQuarantined(item, settings)).ToHashSet();
         var removedBundles = selected.Where(item => item.Kind != MediaKind.Sidecar).Select(item => item.BundleKey).ToHashSet();
         var sidecarRedirects = BuildExactDuplicateRedirects(media);
         foreach (var sidecar in media.Where(item => item.Kind == MediaKind.Sidecar && removedBundles.Contains(item.BundleKey)))
         {
             var hasKeptPrimary = media.Any(item => item.Kind != MediaKind.Sidecar && item.BundleKey == sidecar.BundleKey && item.WillKeep);
             // sidecar bajtove kopie zustava - pri organizaci se pripoji k ponechane kopii
-            if (!hasKeptPrimary && !sidecarRedirects.ContainsKey(sidecar.BundleKey))
+            if (!hasKeptPrimary && !sidecarRedirects.ContainsKey(sidecar.BundleKey) &&
+                !IsAlreadyQuarantined(sidecar, settings))
             {
                 sidecar.WillKeep = false;
                 selected.Add(sidecar);
@@ -174,6 +177,15 @@ public sealed class OrganizationPlanner
         }
 
         return plans;
+    }
+
+    private static bool IsAlreadyQuarantined(MediaItem item, AppSettings settings)
+    {
+        if (item.Status != "Hotovo") return false;
+        var root = Path.GetFullPath(Path.Combine(item.SourceRoot, SanitizeSegment(settings.QuarantineFolderName)))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var current = Path.GetFullPath(item.FilePath);
+        return current.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string SanitizeSegment(string value)

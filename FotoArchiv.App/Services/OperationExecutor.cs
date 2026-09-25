@@ -18,6 +18,18 @@ public sealed class OperationExecutor(CatalogService catalog)
 
         try
         {
+            foreach (var item in plan.Where(item => item.Action == PlannedAction.Error))
+            {
+                item.Status = "Chyba";
+                errors++;
+                await catalog.RecordOperationAsync(runId, item, null, "Chyba",
+                    item.Warning ?? "Plán nelze provést.", cancellationToken);
+            }
+            foreach (var item in plan.Where(item => item.Action == PlannedAction.Skip))
+            {
+                item.Status = "Přeskočeno";
+            }
+
             foreach (var item in executablePlan)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -91,7 +103,7 @@ public sealed class OperationExecutor(CatalogService catalog)
         }
     }
 
-    public async Task<long> UndoAsync(
+    public async Task<(long RunId, int ErrorCount)> UndoAsync(
         long originalRunId,
         IProgress<(int Completed, int Total)>? progress,
         CancellationToken cancellationToken)
@@ -124,6 +136,11 @@ public sealed class OperationExecutor(CatalogService catalog)
 
                     if (operation.Action == PlannedAction.Copy)
                     {
+                        if (!File.Exists(operation.SourcePath))
+                            throw new IOException("Původní soubor chybí; ověřená kopie zůstává zachována.");
+                        var originalHash = await HashService.ComputeSha256Async(operation.SourcePath, cancellationToken);
+                        if (!originalHash.Equals(operation.SourceHash, StringComparison.OrdinalIgnoreCase))
+                            throw new IOException("Původní soubor se změnil; ověřená kopie zůstává zachována.");
                         File.Delete(operation.TargetPath);
                     }
                     else if (operation.Action is PlannedAction.Move or PlannedAction.Quarantine)
@@ -163,7 +180,7 @@ public sealed class OperationExecutor(CatalogService catalog)
             }
 
             await catalog.CompleteRunAsync(undoRunId, errors == 0 ? "Hotovo" : "Dokončeno s chybami", cancellationToken);
-            return undoRunId;
+            return (undoRunId, errors);
         }
         catch (OperationCanceledException)
         {

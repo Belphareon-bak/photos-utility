@@ -509,8 +509,11 @@ public sealed class MainViewModel : ObservableObject
                 ProgressValue = value.Total == 0 ? 0 : value.Completed * 100d / value.Total;
                 StatusMessage = $"Vracím běh: {value.Completed} / {value.Total}";
             });
-            await _executor.UndoAsync(SelectedHistory.RunId, progress, cancellationToken);
-            StatusMessage = $"Vrácení běhu #{SelectedHistory.RunId} bylo dokončeno.";
+            var originalRunId = SelectedHistory.RunId;
+            var outcome = await _executor.UndoAsync(originalRunId, progress, cancellationToken);
+            StatusMessage = outcome.ErrorCount == 0
+                ? $"Vrácení běhu #{originalRunId} bylo dokončeno."
+                : $"Vrácení běhu #{originalRunId} skončilo s {outcome.ErrorCount} chybami; podrobnosti jsou v historii.";
             await LoadHistoryAsync(cancellationToken);
         }
         finally

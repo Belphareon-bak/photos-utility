@@ -45,4 +45,4 @@ Tohle jsem na Linuxu ověřit nemohl:
 ```powershell
 .\.dotnet\dotnet.exe test .\FotoArchiv.Tests\FotoArchiv.Tests.csproj
 ```
-Na Windows musí projít všech 31.
+Na Windows musí projít celá aktuální sada; počet testů z historické revize už není aktuální. Výsledek izolované linuxové sady a otevřený blokující nález jsou v `REVIZE-3-2026-09-25.md`.
