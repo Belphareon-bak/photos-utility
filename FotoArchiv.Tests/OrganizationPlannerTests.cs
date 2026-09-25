@@ -104,4 +104,77 @@ public sealed class OrganizationPlannerTests
         Assert.Contains(plan, item => item.TargetPath.EndsWith(System.IO.Path.Combine("2025-09-12", "001.heic")));
         Assert.Contains(plan, item => item.TargetPath.EndsWith(System.IO.Path.Combine("2025-09-12", "001.mov")));
     }
+
+    [Fact]
+    public void ExactDuplicateSidecar_SurvivesQuarantineAndFollowsKeptPhoto()
+    {
+        using var source = new TestDirectory();
+        using var destination = new TestDirectory();
+        var kept = TestMedia.Create(source.File("kept.jpg"), source.Path);
+        var dropped = TestMedia.Create(source.File("dropped.jpg"), source.Path);
+        kept.DuplicateGroupId = dropped.DuplicateGroupId = "DUP-0001";
+        kept.DuplicateConfidence = dropped.DuplicateConfidence = DuplicateConfidence.Exact;
+        dropped.WillKeep = false;
+        var sidecar = TestMedia.Create(source.File("dropped.xmp"), source.Path, MediaKind.Sidecar);
+        var planner = new OrganizationPlanner();
+        var settings = new AppSettings { DestinationRoot = destination.Path };
+
+        var quarantine = planner.BuildQuarantinePlan([dropped, kept, sidecar], settings);
+        Assert.Single(quarantine, item => item.Media == dropped);
+        Assert.DoesNotContain(quarantine, item => item.Media == sidecar);
+        Assert.True(sidecar.WillKeep);
+
+        var archive = planner.Build([dropped, kept, sidecar], settings);
+        var photoTarget = Assert.Single(archive, item => item.Media == kept).TargetPath;
+        var sidecarPlan = Assert.Single(archive, item => item.Media == sidecar);
+        Assert.Equal(Path.ChangeExtension(photoTarget, ".xmp"), sidecarPlan.TargetPath);
+        Assert.Equal(PlannedAction.Copy, sidecarPlan.Action);
+    }
+
+    [Fact]
+    public void ExactDuplicateSidecars_AreBothPreservedWithoutOverwriting()
+    {
+        using var source = new TestDirectory();
+        using var destination = new TestDirectory();
+        var kept = TestMedia.Create(source.File("kept.jpg"), source.Path);
+        var dropped = TestMedia.Create(source.File("dropped.jpg"), source.Path);
+        kept.DuplicateGroupId = dropped.DuplicateGroupId = "DUP-0001";
+        kept.DuplicateConfidence = dropped.DuplicateConfidence = DuplicateConfidence.Exact;
+        dropped.WillKeep = false;
+        var droppedSidecar = TestMedia.Create(source.File("dropped.xmp"), source.Path, MediaKind.Sidecar);
+        var keptSidecar = TestMedia.Create(source.File("kept.xmp"), source.Path, MediaKind.Sidecar);
+        var planner = new OrganizationPlanner();
+        var settings = new AppSettings { DestinationRoot = destination.Path };
+
+        var quarantine = planner.BuildQuarantinePlan([dropped, droppedSidecar, kept, keptSidecar], settings);
+        Assert.DoesNotContain(quarantine, item => item.Media.Kind == MediaKind.Sidecar);
+
+        var archive = planner.Build([dropped, droppedSidecar, kept, keptSidecar], settings);
+        var photoTarget = Assert.Single(archive, item => item.Media == kept).TargetPath;
+        var keptPlan = Assert.Single(archive, item => item.Media == keptSidecar);
+        var droppedPlan = Assert.Single(archive, item => item.Media == droppedSidecar);
+        Assert.Equal(Path.ChangeExtension(photoTarget, ".xmp"), keptPlan.TargetPath);
+        Assert.NotEqual(keptPlan.TargetPath, droppedPlan.TargetPath);
+        Assert.EndsWith("001_2.xmp", droppedPlan.TargetPath);
+        Assert.NotNull(droppedPlan.Warning);
+    }
+
+    [Fact]
+    public void VisuallySimilarDuplicateSidecar_StaysWithQuarantinedPhoto()
+    {
+        using var source = new TestDirectory();
+        var kept = TestMedia.Create(source.File("kept.jpg"), source.Path);
+        var dropped = TestMedia.Create(source.File("dropped.jpg"), source.Path);
+        kept.DuplicateGroupId = dropped.DuplicateGroupId = "DUP-0002";
+        kept.DuplicateConfidence = dropped.DuplicateConfidence = DuplicateConfidence.High;
+        dropped.WillKeep = false;
+        var sidecar = TestMedia.Create(source.File("dropped.xmp"), source.Path, MediaKind.Sidecar);
+
+        var quarantine = new OrganizationPlanner().BuildQuarantinePlan(
+            [kept, dropped, sidecar], new AppSettings());
+
+        Assert.Contains(quarantine, item => item.Media == dropped);
+        Assert.Contains(quarantine, item => item.Media == sidecar);
+        Assert.False(sidecar.WillKeep);
+    }
 }

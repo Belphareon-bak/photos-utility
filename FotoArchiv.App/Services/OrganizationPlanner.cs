@@ -35,6 +35,7 @@ public sealed class OrganizationPlanner
         var usedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var plans = new List<OrganizationPlanItem>();
         var counters = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var sidecarRedirects = BuildExactDuplicateRedirects(media);
 
         foreach (var bundle in primaries
                      .GroupBy(item => item.BundleKey)
@@ -75,9 +76,15 @@ public sealed class OrganizationPlanner
             }
         }
 
-        foreach (var sidecar in sidecars)
+        // Sidecary ponechanych souboru dostanou bezny nazev. Sidecary
+        // vyrazenych bajtovych kopii nasleduji az po nich.
+        foreach (var sidecar in sidecars
+                     .OrderBy(item => bundleTargets.ContainsKey(item.BundleKey) ? 0 : 1)
+                     .ThenBy(item => item.FilePath, StringComparer.OrdinalIgnoreCase))
         {
-            if (!bundleTargets.TryGetValue(sidecar.BundleKey, out var targetInfo))
+            if (!bundleTargets.TryGetValue(sidecar.BundleKey, out var targetInfo) &&
+                !(sidecarRedirects.TryGetValue(sidecar.BundleKey, out var keptBundle) &&
+                  bundleTargets.TryGetValue(keptBundle, out targetInfo)))
             {
                 plans.Add(new OrganizationPlanItem
                 {
@@ -92,21 +99,19 @@ public sealed class OrganizationPlanner
 
             var suffix = GetSidecarSuffix(sidecar.FileName, targetInfo.Representative.Extension);
             var target = Path.Combine(targetInfo.Directory, targetInfo.BaseName + suffix);
-            if (File.Exists(target) || !usedTargets.Add(target))
+            string? warning = null;
+            if (File.Exists(target) || usedTargets.Contains(target))
             {
-                plans.Add(new OrganizationPlanItem
-                {
-                    Media = sidecar,
-                    SourcePath = sidecar.FilePath,
-                    TargetPath = target,
-                    Action = PlannedAction.Error,
-                    Warning = "Cílový sidecar již existuje."
-                });
-                continue;
+                // Dva sidecary mohou obsahovat ruzne upravy tehoz obrazku.
+                // Zachovat oba, ale druhemu dat odlisny nazev a upozornit,
+                // ze je treba rozhodnout o slouceni metadat.
+                target = MakeUnique(target, usedTargets);
+                warning = "Další sidecar shodné fotografie má odlišný název; zkontrolujte sloučení metadat.";
             }
 
+            usedTargets.Add(target);
             sidecar.TargetPath = target;
-            plans.Add(CreatePlan(sidecar, target, settings.TransferMode));
+            plans.Add(CreatePlan(sidecar, target, settings.TransferMode, warning));
         }
 
         foreach (var item in rejected)
@@ -135,10 +140,12 @@ public sealed class OrganizationPlanner
         var plans = new List<OrganizationPlanItem>();
         var selected = media.Where(item => !item.WillKeep).ToHashSet();
         var removedBundles = selected.Where(item => item.Kind != MediaKind.Sidecar).Select(item => item.BundleKey).ToHashSet();
+        var sidecarRedirects = BuildExactDuplicateRedirects(media);
         foreach (var sidecar in media.Where(item => item.Kind == MediaKind.Sidecar && removedBundles.Contains(item.BundleKey)))
         {
             var hasKeptPrimary = media.Any(item => item.Kind != MediaKind.Sidecar && item.BundleKey == sidecar.BundleKey && item.WillKeep);
-            if (!hasKeptPrimary)
+            // sidecar bajtove kopie zustava - pri organizaci se pripoji k ponechane kopii
+            if (!hasKeptPrimary && !sidecarRedirects.ContainsKey(sidecar.BundleKey))
             {
                 sidecar.WillKeep = false;
                 selected.Add(sidecar);
@@ -194,13 +201,13 @@ public sealed class OrganizationPlanner
         return Path.Combine(segments.ToArray());
     }
 
-    private static OrganizationPlanItem CreatePlan(MediaItem item, string target, TransferMode mode) => new()
+    private static OrganizationPlanItem CreatePlan(MediaItem item, string target, TransferMode mode, string? warning = null) => new()
     {
         Media = item,
         SourcePath = item.FilePath,
         TargetPath = target,
         Action = mode == TransferMode.Copy ? PlannedAction.Copy : PlannedAction.Move,
-        Warning = target.Length > 240 ? "Dlouhá cílová cesta; ověřte podporu dlouhých cest na NAS." : null
+        Warning = warning ?? (target.Length > 240 ? "Dlouhá cílová cesta; ověřte podporu dlouhých cest na NAS." : null)
     };
 
     private static string GetSidecarSuffix(string fileName, string primaryExtension)
@@ -212,6 +219,41 @@ public sealed class OrganizationPlanner
         }
 
         return Path.GetExtension(fileName).ToLowerInvariant();
+    }
+
+    // Sidecar (xmp, aae, json) patri ke konkretnimu souboru. Kdyz se ten soubor jako
+    // BAJTOVA kopie neponecha, plati sidecar stejne pro ponechanou kopii - obsah je
+    // identicky. Driv takovy sidecar skoncil v karantene s vyrazenou kopii a v archivu
+    // chybely upravy a hodnoceni. U jen podobnych snimku (High/Low) se nepresmerovava:
+    // tam by upravy patrily k jinemu souboru.
+    // Vraci: BundleKey vyrazene kopie -> BundleKey ponechane kopie.
+    private static Dictionary<string, string> BuildExactDuplicateRedirects(IReadOnlyList<MediaItem> media)
+    {
+        static bool IsExactPrimary(MediaItem item) =>
+            item.Kind != MediaKind.Sidecar && item.DuplicateGroupId is not null &&
+            item.DuplicateConfidence == DuplicateConfidence.Exact;
+
+        var keptByGroup = media
+            .Where(item => IsExactPrimary(item) && item.WillKeep)
+            .GroupBy(item => item.DuplicateGroupId!)
+            .ToDictionary(group => group.Key, group => group.First().BundleKey);
+        var keptBundles = media
+            .Where(item => item.Kind != MediaKind.Sidecar && item.WillKeep)
+            .Select(item => item.BundleKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var redirects = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var dropped in media.Where(item => IsExactPrimary(item) && !item.WillKeep))
+        {
+            // kdyz ze stejneho svazku (napr. live photo HEIC + MOV) neco zustava, sidecar zustava u nej
+            if (keptBundles.Contains(dropped.BundleKey)) continue;
+            if (keptByGroup.TryGetValue(dropped.DuplicateGroupId!, out var kept))
+            {
+                redirects.TryAdd(dropped.BundleKey, kept);
+            }
+        }
+
+        return redirects;
     }
 
     // Path.GetRelativePath vraci segmenty ".." kdyz SourceRoot neni predkem FilePath.

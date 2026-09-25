@@ -8,7 +8,9 @@ Dobrý vzorek má kolem 100–300 souborů a obsahuje:
 - fotky z různých telefonů, včetně **HEIC z iPhonu** a videí `.MOV`,
 - videa, jejichž název **neobsahuje datum** (`IMG_1234.MOV`) — tam se pozná oprava data z videa,
 - něco z Google Takeout, pokud tam jsou JSONy,
-- záměrně jednu fotku dvakrát a jednu zmenšenou kopii.
+- záměrně jednu fotku dvakrát (včetně `.xmp` u vyřazené kopie)
+  a jednu zmenšenou kopii. Pokud mají `.xmp` obě bajtové kopie,
+  musí v archivu zůstat oba sidecary; druhý dostane `_2` a varování.
 
 ## 1. Rychle, bez okna: konzolová zkouška
 ```powershell
