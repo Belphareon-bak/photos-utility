@@ -4,13 +4,67 @@ namespace FotoArchiv.App.Services;
 
 public sealed class OperationExecutor(CatalogService catalog)
 {
+    public async Task RecoverPendingAsync(CancellationToken cancellationToken)
+    {
+        using var operationLock = catalog.AcquireExclusiveOperationLock();
+        await RecoverPendingCoreAsync(cancellationToken);
+    }
+
+    private async Task RecoverPendingCoreAsync(CancellationToken cancellationToken)
+    {
+        await catalog.InitializeAsync(cancellationToken);
+        var unresolved = new List<string>();
+        foreach (var operation in await catalog.GetPendingOperationsAsync(cancellationToken))
+        {
+            var sourceExists = File.Exists(operation.SourcePath);
+            var targetExists = File.Exists(operation.TargetPath);
+            var sourceMatches = sourceExists &&
+                (await HashService.ComputeSha256Async(operation.SourcePath, cancellationToken))
+                .Equals(operation.SourceHash, StringComparison.OrdinalIgnoreCase);
+            var targetMatches = targetExists &&
+                (await HashService.ComputeSha256Async(operation.TargetPath, cancellationToken))
+                .Equals(operation.SourceHash, StringComparison.OrdinalIgnoreCase);
+
+            var completed = operation.Action switch
+            {
+                "Copy" => targetMatches,
+                "Move" or "Quarantine" or "UndoMove" => targetMatches && !sourceExists,
+                "UndoCopy" => !sourceExists && targetMatches,
+                _ => false
+            };
+            var notApplied = operation.Action switch
+            {
+                "Copy" or "Move" or "Quarantine" or "UndoMove" => sourceMatches && !targetExists,
+                "UndoCopy" => sourceMatches && targetMatches,
+                _ => false
+            };
+
+            if (completed || notApplied)
+                RemoveRecordedTemporaryCopy(operation);
+
+            if (completed)
+                await catalog.FinishOperationAsync(operation.Id, "Hotovo", "Dokončení potvrzeno kontrolním součtem po přerušení.", cancellationToken);
+            else if (notApplied)
+                await catalog.FinishOperationAsync(operation.Id, "Chyba", "Operace se před přerušením neprovedla.", cancellationToken);
+            else
+                unresolved.Add($"#{operation.Id}: {operation.SourcePath} -> {operation.TargetPath}");
+        }
+
+        await catalog.MarkPendingRunsForReviewAsync(cancellationToken);
+        await catalog.CloseInterruptedRunsAsync(cancellationToken);
+        if (unresolved.Count > 0)
+            throw new InvalidOperationException("Rozpracované operace mají nejednoznačný stav. Soubory nebyly změněny; " +
+                "před dalším během je nutná ruční kontrola: " + string.Join("; ", unresolved));
+    }
+
     public async Task<long> ExecuteAsync(
         IReadOnlyList<OrganizationPlanItem> plan,
         string runType,
         IProgress<(int Completed, int Total)>? progress,
         CancellationToken cancellationToken)
     {
-        await catalog.InitializeAsync(cancellationToken);
+        using var operationLock = catalog.AcquireExclusiveOperationLock();
+        await RecoverPendingCoreAsync(cancellationToken);
         var runId = await catalog.StartRunAsync(runType, cancellationToken);
         var completed = 0;
         var errors = 0;
@@ -34,6 +88,7 @@ public sealed class OperationExecutor(CatalogService catalog)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string? temporaryPath = null;
+                long? operationId = null;
 
                 try
                 {
@@ -42,36 +97,34 @@ public sealed class OperationExecutor(CatalogService catalog)
                     if (File.Exists(item.TargetPath))
                         throw new IOException("Cílový soubor již existuje; nebyl přepsán.");
 
-                    Directory.CreateDirectory(Path.GetDirectoryName(item.TargetPath)!);
+                    var sourceHash = await HashService.ComputeSha256Async(item.SourcePath, cancellationToken);
                     temporaryPath = item.TargetPath + $".fotoarchiv-{Guid.NewGuid():N}.partial";
+                    operationId = await catalog.BeginOperationAsync(runId, item.SourcePath, item.TargetPath,
+                        item.Action.ToString(), sourceHash, null, temporaryPath, cancellationToken);
+                    Directory.CreateDirectory(Path.GetDirectoryName(item.TargetPath)!);
                     await CopyAsync(item.SourcePath, temporaryPath, cancellationToken);
 
-                    var sourceHash = item.Media.Sha256 ?? await HashService.ComputeSha256Async(item.SourcePath, cancellationToken);
                     var targetHash = await HashService.ComputeSha256Async(temporaryPath, cancellationToken);
                     if (!sourceHash.Equals(targetHash, StringComparison.OrdinalIgnoreCase))
                         throw new IOException("Kontrolní součet kopie nesouhlasí se zdrojem.");
 
                     File.Move(temporaryPath, item.TargetPath, false);
                     temporaryPath = null;
+                    VerifyTimestamps(item.SourcePath, item.TargetPath);
+                    var publishedHash = await HashService.ComputeSha256Async(item.TargetPath, cancellationToken);
+                    if (!publishedHash.Equals(sourceHash, StringComparison.OrdinalIgnoreCase))
+                        throw new IOException("Zveřejněný cílový soubor se po přesunu změnil; zdroj zůstává zachován.");
 
                     if (item.Action is PlannedAction.Move or PlannedAction.Quarantine)
                     {
-                        try
-                        {
-                            File.Delete(item.SourcePath);
-                        }
-                        catch
-                        {
-                            // The verified target was created by this operation; remove it to keep a failed move atomic.
-                            File.Delete(item.TargetPath);
-                            throw;
-                        }
+                        File.Delete(item.SourcePath);
                         item.Media.FilePath = item.TargetPath;
                     }
 
+                    await catalog.FinishOperationAsync(operationId.Value, "Hotovo", null, cancellationToken);
+                    operationId = null;
                     item.Status = "Hotovo";
                     item.Media.Status = "Hotovo";
-                    await catalog.RecordOperationAsync(runId, item, sourceHash, "Hotovo", null, cancellationToken);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
@@ -82,7 +135,16 @@ public sealed class OperationExecutor(CatalogService catalog)
                         File.Delete(temporaryPath);
                     }
 
-                    await catalog.RecordOperationAsync(runId, item, null, "Chyba", exception.Message, cancellationToken);
+                    if (operationId is long pendingId)
+                    {
+                        if (!File.Exists(item.TargetPath) && File.Exists(item.SourcePath))
+                            await catalog.FinishOperationAsync(pendingId, "Chyba", exception.Message, cancellationToken);
+                        else
+                            throw new InvalidOperationException(
+                                $"Operace má nejednoznačný stav; ověřte zdroj i cíl: {item.SourcePath} -> {item.TargetPath}", exception);
+                    }
+                    else
+                        await catalog.RecordOperationAsync(runId, item, null, "Chyba", exception.Message, cancellationToken);
                 }
                 finally
                 {
@@ -108,7 +170,8 @@ public sealed class OperationExecutor(CatalogService catalog)
         IProgress<(int Completed, int Total)>? progress,
         CancellationToken cancellationToken)
     {
-        await catalog.InitializeAsync(cancellationToken);
+        using var operationLock = catalog.AcquireExclusiveOperationLock();
+        await RecoverPendingCoreAsync(cancellationToken);
         var operations = await catalog.GetCompletedOperationsAsync(originalRunId, cancellationToken);
         if (operations.Count == 0)
         {
@@ -125,6 +188,7 @@ public sealed class OperationExecutor(CatalogService catalog)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string? temporaryPath = null;
+                long? operationId = null;
                 try
                 {
                     if (!File.Exists(operation.TargetPath))
@@ -141,6 +205,8 @@ public sealed class OperationExecutor(CatalogService catalog)
                         var originalHash = await HashService.ComputeSha256Async(operation.SourcePath, cancellationToken);
                         if (!originalHash.Equals(operation.SourceHash, StringComparison.OrdinalIgnoreCase))
                             throw new IOException("Původní soubor se změnil; ověřená kopie zůstává zachována.");
+                        operationId = await catalog.BeginOperationAsync(undoRunId, operation.TargetPath,
+                            operation.SourcePath, "UndoCopy", operation.SourceHash, operation.Id, null, cancellationToken);
                         File.Delete(operation.TargetPath);
                     }
                     else if (operation.Action is PlannedAction.Move or PlannedAction.Quarantine)
@@ -148,8 +214,10 @@ public sealed class OperationExecutor(CatalogService catalog)
                         if (File.Exists(operation.SourcePath))
                             throw new IOException("Původní cesta je již obsazená; vrácení bylo zablokováno.");
 
-                        Directory.CreateDirectory(Path.GetDirectoryName(operation.SourcePath)!);
                         temporaryPath = operation.SourcePath + $".fotoarchiv-{Guid.NewGuid():N}.partial";
+                        operationId = await catalog.BeginOperationAsync(undoRunId, operation.TargetPath,
+                            operation.SourcePath, "UndoMove", operation.SourceHash, operation.Id, temporaryPath, cancellationToken);
+                        Directory.CreateDirectory(Path.GetDirectoryName(operation.SourcePath)!);
                         await CopyAsync(operation.TargetPath, temporaryPath, cancellationToken);
                         var restoredHash = await HashService.ComputeSha256Async(temporaryPath, cancellationToken);
                         if (!restoredHash.Equals(operation.SourceHash, StringComparison.OrdinalIgnoreCase))
@@ -157,18 +225,34 @@ public sealed class OperationExecutor(CatalogService catalog)
 
                         File.Move(temporaryPath, operation.SourcePath, false);
                         temporaryPath = null;
+                        VerifyTimestamps(operation.TargetPath, operation.SourcePath);
+                        var publishedHash = await HashService.ComputeSha256Async(operation.SourcePath, cancellationToken);
+                        if (!publishedHash.Equals(operation.SourceHash, StringComparison.OrdinalIgnoreCase))
+                            throw new IOException("Obnovený soubor se po zveřejnění změnil; archivovaná kopie zůstává zachována.");
                         File.Delete(operation.TargetPath);
                     }
 
-                    await catalog.RecordRawOperationAsync(undoRunId, operation.TargetPath, operation.SourcePath,
-                        "Undo", operation.SourceHash, "Hotovo", null, cancellationToken);
+                    await catalog.FinishOperationAsync(operationId!.Value, "Hotovo", null, cancellationToken);
+                    operationId = null;
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
                     errors++;
                     if (temporaryPath is not null && File.Exists(temporaryPath)) File.Delete(temporaryPath);
-                    await catalog.RecordRawOperationAsync(undoRunId, operation.TargetPath, operation.SourcePath,
-                        "Undo", operation.SourceHash, "Chyba", exception.Message, cancellationToken);
+                    if (operationId is long pendingId)
+                    {
+                        var notApplied = operation.Action == PlannedAction.Copy
+                            ? File.Exists(operation.TargetPath) && File.Exists(operation.SourcePath)
+                            : File.Exists(operation.TargetPath) && !File.Exists(operation.SourcePath);
+                        if (notApplied)
+                            await catalog.FinishOperationAsync(pendingId, "Chyba", exception.Message, cancellationToken);
+                        else
+                            throw new InvalidOperationException(
+                                $"Vrácení má nejednoznačný stav: {operation.TargetPath} -> {operation.SourcePath}", exception);
+                    }
+                    else
+                        await catalog.RecordRawOperationAsync(undoRunId, operation.TargetPath, operation.SourcePath,
+                            "Undo", operation.SourceHash, "Chyba", exception.Message, cancellationToken);
                 }
                 finally
                 {
@@ -198,27 +282,43 @@ public sealed class OperationExecutor(CatalogService catalog)
         {
             await input.CopyToAsync(output, 1024 * 1024, cancellationToken);
             await output.FlushAsync(cancellationToken);
+            output.Flush(flushToDisk: true);
         }
 
         PreserveTimestamps(source, target);
     }
 
-    // Kopie pres FileStream casova razitka neprenasi, na rozdil od File.Copy. Bez tohoto kroku
-    // dostane cil aktualni cas a u souboru bez EXIF se nenavratne ztrati jediny zbyvajici
-    // udaj o dobe porizeni. Razitka se nastavuji na docasny .partial soubor a File.Move
-    // je pri prejmenovani zachova.
+    private static void RemoveRecordedTemporaryCopy(PendingOperation operation)
+    {
+        if (operation.TemporaryPath is null) return;
+        var expected = operation.TargetPath + ".fotoarchiv-";
+        var path = operation.TemporaryPath;
+        var suffixLength = ".partial".Length;
+        if (!path.StartsWith(expected, StringComparison.Ordinal) ||
+            !path.EndsWith(".partial", StringComparison.Ordinal) ||
+            !Guid.TryParseExact(path.Substring(expected.Length, path.Length - expected.Length - suffixLength), "N", out _))
+            throw new InvalidOperationException($"Rozpracovaná operace #{operation.Id} má neplatnou cestu dočasné kopie.");
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    // Cas souboru muze byt jedinym datem snimku bez EXIF. Selhani zachovani
+    // razitek zabrani smazani zdroje; na Windows se kontroluji obe hodnoty.
     private static void PreserveTimestamps(string source, string target)
     {
-        try
-        {
-            var info = new FileInfo(source);
-            File.SetLastWriteTimeUtc(target, info.LastWriteTimeUtc);
-            File.SetCreationTimeUtc(target, info.CreationTimeUtc);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-                                              or ArgumentOutOfRangeException or PlatformNotSupportedException)
-        {
-            // Nektere cile (SMB, FAT) zapis razitek odmitnou; samotna kopie tim neprestava platit.
-        }
+        var sourceInfo = new FileInfo(source);
+        File.SetLastWriteTimeUtc(target, sourceInfo.LastWriteTimeUtc);
+        if (OperatingSystem.IsWindows())
+            File.SetCreationTimeUtc(target, sourceInfo.CreationTimeUtc);
+        VerifyTimestamps(source, target);
+    }
+
+    private static void VerifyTimestamps(string source, string target)
+    {
+        var sourceInfo = new FileInfo(source);
+        if (Math.Abs((File.GetLastWriteTimeUtc(target) - sourceInfo.LastWriteTimeUtc).TotalSeconds) > 2)
+            throw new IOException("Cílový svazek nezachoval čas poslední změny; zdroj zůstává zachován.");
+        if (OperatingSystem.IsWindows() &&
+            Math.Abs((File.GetCreationTimeUtc(target) - sourceInfo.CreationTimeUtc).TotalSeconds) > 2)
+            throw new IOException("Cílový svazek nezachoval čas vytvoření; zdroj zůstává zachován.");
     }
 }

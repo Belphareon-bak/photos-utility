@@ -25,19 +25,23 @@ Výběr nejlepší varianty je oddělený od jistoty shody. Přednost má RAW/or
 
 - Existující cílový soubor se nikdy nepřepisuje.
 - Kopie vzniká nejprve jako dočasný soubor a před dokončením se porovná SHA-256 se zdrojem.
+- Před odstraněním zdroje se na finálním cíli znovu ověří SHA-256 a časy souboru. Na Windows se vyžaduje zachování času poslední změny i vytvoření.
 - Přesun maže zdroj až po úspěšném ověření kopie.
-- Každá operace se zapisuje do lokální SQLite historie.
-- Vrácení běhu je povoleno pouze tehdy, pokud se kontrolní hash od provedení nezměnil.
+- Záměr operace se uloží do lokální SQLite historie **před** změnou souborů. Po přerušení aplikace ověří zdroj a cíl podle SHA-256 a doplní výsledek; nejednoznačný stav zablokuje další přesuny bez mazání souborů.
+- Rozpracovaná kopie má v historii vlastní přesnou cestu; po přerušení ji aplikace uklidí pouze při jednoznačně ověřeném stavu zdroje a cíle.
+- Vrácení běhu kontroluje SHA-256 a zapisuje vlastní záměr před změnou souborů. Již úspěšně vrácené položky znovu nevrací; u změněných souborů nebo obsazené původní cesty se zastaví.
 - Cíl uvnitř zdrojového stromu je zakázaný, aby další sken znovu nenačetl výstup.
+
+Pro skutečné soubory používejte nejprve kopii vzorku. Karanténa duplicit soubory **přesouvá** i tehdy, když je následná organizace v režimu kopírování. Starý katalog se při prvním otevření migruje bez smazání historie.
 
 ## Vývoj
 
 Projekt používá WPF a .NET 10 pro Windows x64.
 
 ```powershell
-.\.dotnet\dotnet.exe test .\FotoArchiv.Tests\FotoArchiv.Tests.csproj
-.\.dotnet\dotnet.exe run --project .\FotoArchiv.App\FotoArchiv.App.csproj
-.\.dotnet\dotnet.exe publish .\FotoArchiv.App\FotoArchiv.App.csproj -c Release -r win-x64 --self-contained true
+dotnet test .\FotoArchiv.Tests\FotoArchiv.Tests.csproj
+dotnet run --project .\FotoArchiv.App\FotoArchiv.App.csproj
+dotnet publish .\FotoArchiv.App\FotoArchiv.App.csproj -c Release -r win-x64 --self-contained true
 ```
 
 Offline geolokace používá `cities500.zip`, detailní `CZ.zip` a `admin1CodesASCII.txt` ve složce `FotoArchiv.App\Data`. Další země lze doplnit vložením příslušného GeoNames ZIPu do stejné složky.

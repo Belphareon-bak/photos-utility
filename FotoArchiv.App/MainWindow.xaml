@@ -321,12 +321,15 @@
                             <DataGridTextColumn Header="Stav" Binding="{Binding Status}" Width="*" />
                         </DataGrid.Columns>
                     </DataGrid>
-                    <Button Grid.Row="2" Command="{Binding UndoRunCommand}" HorizontalAlignment="Right" Margin="0,12,0,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE7A7;" Margin="0,0,8,0" />
-                            <TextBlock Text="Vrátit vybraný běh" />
-                        </StackPanel>
-                    </Button>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <Button Command="{Binding RetryHistoryCommand}" Margin="0,0,8,0" Content="Znovu ověřit historii" />
+                        <Button Command="{Binding UndoRunCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE7A7;" Margin="0,0,8,0" />
+                                <TextBlock Text="Vrátit vybraný běh" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </TabItem>
         </TabControl>

@@ -15,7 +15,7 @@ Dobrý vzorek má kolem 100–300 souborů a obsahuje:
 ## 1. Rychle, bez okna: konzolová zkouška
 ```powershell
 cd tools\FotoArchiv.Zkouska
-..\..\.dotnet\dotnet.exe run -- beh D:\vzorek D:\vzorek-archiv
+dotnet run -- beh D:\vzorek D:\vzorek-archiv
 ```
 Projdi výpis:
 - **ODKUD SE VZALO DATUM** — řádek „cas souboru <- nespolehlive" má být co nejkratší.
@@ -39,10 +39,21 @@ Tohle jsem na Linuxu ověřit nemohl:
 | | Proč |
 |---|---|
 | sestavení a spuštění WPF okna | WPF na Linuxu neexistuje |
-| test `Move_RollsBackVerifiedTargetWhenSourceCannotBeDeleted` | spoléhá na `FileAttributes.ReadOnly`, které na Linuxu smazání nezabrání |
+| test `Move_PreservesBothCopiesForReviewWhenSourceCannotBeDeleted` | spoléhá na `FileAttributes.ReadOnly`, které na Linuxu smazání nezabrání |
 | zachování **času vytvoření** (`CreationTime`) | Linux ho nastavit neumí; ověřen byl jen čas poslední změny |
 
 ```powershell
-.\.dotnet\dotnet.exe test .\FotoArchiv.Tests\FotoArchiv.Tests.csproj
+dotnet test .\FotoArchiv.Tests\FotoArchiv.Tests.csproj
 ```
-Na Windows musí projít celá aktuální sada; počet testů z historické revize už není aktuální. Výsledek izolované linuxové sady a otevřený blokující nález jsou v `REVIZE-3-2026-09-25.md`.
+Na Windows musí projít celá aktuální sada; počet testů z historické revize už není aktuální. Aktuální stav opravy a výsledek izolované linuxové sady jsou v `REVIZE-4-2026-09-26.md`.
+
+
+## 3. Ověření obnovy po přerušení (nová implementace)
+
+Na kopii vzorku proveď kopii, přesun i karanténu; po každé fázi zkontroluj
+SHA-256 zdrojů a cílů a historii běhů. Na kartě Historie vyzkoušej
+„Znovu ověřit historii“ a následné vrácení. Při obsazené původní cestě
+nebo změněném souboru má aplikace odmítnout danou položku a ponechat oba
+soubory k ruční kontrole. Zkouška SQLite selhání po fyzickém přesunu a vrácení
+je v `JournalRecoveryTests.cs`; její izolovaný linuxový běh je popsaný v
+`REVIZE-4-2026-09-26.md`.

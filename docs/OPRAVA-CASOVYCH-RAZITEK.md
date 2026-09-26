@@ -1,5 +1,8 @@
 # Oprava zacházení s časem pořízení
 
+**Historický stav z první opravy.** Aktuální chování po čtvrté revizi popisuje
+`REVIZE-4-2026-09-26.md`; ověření časů je nyní povinné před odstraněním zdroje.
+
 Větev `fix/zachovani-casovych-razitek`. Tři změny ve dvou souborech, 50 přidaných řádků.
 Řeší jeden problém ve třech projevech: **aplikace ztrácela datum pořízení u souborů,
 které nemají EXIF.**
@@ -60,8 +63,9 @@ Razítka se nastavují na dočasný `.partial` soubor. `File.Move` je při přej
 na cílové jméno zachová, takže pořadí kroků zůstalo nedotčené. Nastavení razítek
 nemění obsah, takže kontrolu SHA-256, která následuje, nijak neovlivní.
 
-Selhání zápisu razítek se polyká — některé cíle (SMB, FAT) ho odmítnou a samotná
-kopie tím neztrácí platnost.
+V této původní verzi se selhání zápisu razítek polykalo. Čtvrtá revize to změnila:
+čas poslední změny se ověřuje na všech svazcích a na Windows také čas vytvoření.
+Pokud je cílový svazek nezachová, zdroj se nesmaže.
 
 ### 2. Záložní datum bere starší z obou časů
 `Services/MetadataReaderService.cs` — místo `item.FileCreatedAt` se použije starší

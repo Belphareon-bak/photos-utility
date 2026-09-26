@@ -35,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _isBusy;
     private bool _duplicateScanCompleted;
     private bool _duplicatePhaseCompleted;
+    private bool _historyReady;
     private int _activeTabIndex;
     private double _progressValue;
     private string _statusMessage = "Přidejte jednu nebo více zdrojových složek.";
@@ -51,16 +52,17 @@ public sealed class MainViewModel : ObservableObject
         KeepSelectedCommand = new RelayCommand(KeepSelected, () => SelectedDuplicateGroup is not null && SelectedMedia is not null && !IsBusy);
         KeepAllCommand = new RelayCommand(KeepAll, () => SelectedDuplicateGroup is not null && !IsBusy);
         RunQuarantineCommand = new AsyncRelayCommand(RunQuarantineAsync,
-            () => DuplicateGroups.Count > 0 && DuplicateGroups.All(group => group.IsResolved) && !DuplicatePhaseCompleted && !IsBusy,
+            () => _historyReady && DuplicateGroups.Count > 0 && DuplicateGroups.All(group => group.IsResolved) && !DuplicatePhaseCompleted && !IsBusy,
             HandleError);
         BuildPlanCommand = new AsyncRelayCommand(BuildPlanAsync,
             () => DuplicatePhaseCompleted && !string.IsNullOrWhiteSpace(DestinationRoot) && !IsBusy,
             HandleError);
         ExecutePlanCommand = new AsyncRelayCommand(ExecutePlanAsync,
-            () => PlanItems.Any(item => item.Action is PlannedAction.Copy or PlannedAction.Move) && !IsBusy,
+            () => _historyReady && PlanItems.Any(item => item.Action is PlannedAction.Copy or PlannedAction.Move) && !IsBusy,
             HandleError);
         CancelCommand = new RelayCommand(CancelCurrent, () => IsBusy);
-        UndoRunCommand = new AsyncRelayCommand(UndoRunAsync, () => SelectedHistory is not null && !IsBusy, HandleError);
+        RetryHistoryCommand = new AsyncRelayCommand(LoadHistoryAsync, () => !IsBusy, HandleError);
+        UndoRunCommand = new AsyncRelayCommand(UndoRunAsync, () => _historyReady && SelectedHistory is not null && !IsBusy, HandleError);
 
         _ = LoadHistoryAsync(CancellationToken.None);
     }
@@ -82,6 +84,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand BuildPlanCommand { get; }
     public AsyncRelayCommand ExecutePlanCommand { get; }
     public RelayCommand CancelCommand { get; }
+    public AsyncRelayCommand RetryHistoryCommand { get; }
     public AsyncRelayCommand UndoRunCommand { get; }
 
     public SourceFolder? SelectedSource
@@ -481,16 +484,21 @@ public sealed class MainViewModel : ObservableObject
     {
         try
         {
-            await _catalog.InitializeAsync(cancellationToken);
+            await _executor.RecoverPendingAsync(cancellationToken);
             var history = await _catalog.GetHistoryAsync(cancellationToken);
             History.Clear();
             foreach (var item in history) History.Add(item);
             SelectedHistory = History.FirstOrDefault();
+            _historyReady = true;
+            if (StatusMessage.StartsWith("Historie operací není bezpečně dostupná", StringComparison.Ordinal))
+                StatusMessage = "Historie byla znovu ověřena; práce se soubory je dostupná.";
         }
-        catch
+        catch (Exception exception)
         {
-            // History is supplementary; file analysis can continue if its local database is unavailable.
+            _historyReady = false;
+            StatusMessage = $"Historie operací není bezpečně dostupná; přesuny jsou zablokované: {exception.Message}";
         }
+        NotifyCommands();
     }
 
     private async Task UndoRunAsync(CancellationToken cancellationToken)
@@ -551,6 +559,7 @@ public sealed class MainViewModel : ObservableObject
         BuildPlanCommand.NotifyCanExecuteChanged();
         ExecutePlanCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
+        RetryHistoryCommand.NotifyCanExecuteChanged();
         UndoRunCommand.NotifyCanExecuteChanged();
     }
 }

@@ -46,6 +46,8 @@ public sealed class OperationExecutorTests
 
         var expected = new DateTime(2016, 8, 13, 22, 3, 52, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(source, expected);
+        var expectedCreation = new DateTime(2015, 3, 2, 12, 0, 0, DateTimeKind.Utc);
+        if (OperatingSystem.IsWindows()) File.SetCreationTimeUtc(source, expectedCreation);
 
         var plan = new OrganizationPlanItem
         {
@@ -60,6 +62,8 @@ public sealed class OperationExecutorTests
 
         Assert.Equal("Hotovo", plan.Status);
         Assert.Equal(expected, File.GetLastWriteTimeUtc(target));
+        if (OperatingSystem.IsWindows())
+            Assert.InRange(Math.Abs((File.GetCreationTimeUtc(target) - expectedCreation).TotalSeconds), 0, 2);
     }
 
     [Fact]
@@ -92,7 +96,7 @@ public sealed class OperationExecutorTests
     }
 
     [Fact]
-    public async Task Move_RollsBackVerifiedTargetWhenSourceCannotBeDeleted()
+    public async Task Move_PreservesBothCopiesForReviewWhenSourceCannotBeDeleted()
     {
         using var directory = new TestDirectory();
         var source = directory.File("source/locked.jpg");
@@ -111,11 +115,14 @@ public sealed class OperationExecutorTests
             };
             var executor = new OperationExecutor(new CatalogService(directory.File("state/catalog.db")));
 
-            await executor.ExecuteAsync([plan], "Test failed move", null, CancellationToken.None);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                executor.ExecuteAsync([plan], "Test failed move", null, CancellationToken.None));
 
             Assert.Equal("Chyba", plan.Status);
             Assert.True(File.Exists(source));
-            Assert.False(File.Exists(target));
+            Assert.True(File.Exists(target));
+            Assert.Single(await new CatalogService(directory.File("state/catalog.db"))
+                .GetPendingOperationsAsync(CancellationToken.None));
         }
         finally
         {
